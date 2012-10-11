@@ -82,6 +82,7 @@ public class QuadrantRecognition : MonoBehaviour {
 	private List <ArmsSnapshot> arm_states = new List<ArmsSnapshot>();
 	public List <string> motions = new List<string>();
 	public bool updated = false;
+	float reset_timer = 0.0f;
 	
 	// Use this for initialization
 	void Start () {
@@ -175,6 +176,28 @@ public class QuadrantRecognition : MonoBehaviour {
 			//TODO: adjust movement: displacement/arm_length;
 		}
 		
+		//RESET APPLICATION CONTROLS
+		Vector3 arm = cur_state.right_joints[0].position - cur_state.right_joints[2].position;
+		Vector3 down = new  Vector3(cur_state.right_joints[2].position.x, 
+			cur_state.right_joints[2].position.y-1,
+			cur_state.right_joints[2].position.z) - cur_state.right_joints[2].position;
+		Vector3 larm = cur_state.left_joints[0].position - cur_state.left_joints[2].position;
+		Vector3 ldown = new  Vector3(cur_state.left_joints[2].position.x, 
+			cur_state.left_joints[2].position.y-1,
+			cur_state.left_joints[2].position.z) - cur_state.left_joints[2].position;
+		
+		
+		//get angle between the vectors
+		float angle = Vector3.Angle(down, arm);
+		//Debug.Log(right_out + " Angle is " + angle + " " + reset_timer + " " + Time.deltaTime);
+		float langle = Vector3.Angle(ldown, larm);
+		
+		//arm must be seventy percent extended and shoulder to hand is twenty to forty degrees from downwards
+		if(right_out > .5 && (5 < angle && angle < 60) && langle < 15 ){
+			//TODO: handle reset
+		}
+		else
+			reset_timer = 0f;
 		
 	}
 }
