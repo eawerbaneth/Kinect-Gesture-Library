@@ -5,6 +5,11 @@ using System.IO;
 using System;
 
 public class Naive_Bayesian : MonoBehaviour {
+	//record utilities
+	bool train = false;	
+	bool recording = false;
+	string train_name = "";
+	
 	//struct to keep track of an individual joint position at a given time
 	public struct JointPositionSnapshot{
 		public Vector3 position;
@@ -14,9 +19,7 @@ public class Naive_Bayesian : MonoBehaviour {
 	};
 	
 	string state = "none";
-	public Texture2D[] states;
-	
-	
+	public Texture2D[] states;	
 	float reset_timer = 0.0f;
 	
 	//struct to handle arm states
@@ -45,7 +48,7 @@ public class Naive_Bayesian : MonoBehaviour {
 				if(right[i].transform.position != right_joints[i].position)
 					return true;
 			}
-			return false;			
+			return false;	
 		}
 		public float GetLength(){
 			return (left_joints[0].position - left_joints[1].position).magnitude
@@ -69,6 +72,50 @@ public class Naive_Bayesian : MonoBehaviour {
 		}
 	};
 	
+	public class feature{
+		public float mean;
+		public float std_deviation;
+		
+		public feature(){}
+		public feature(List <float> data){
+			CalculateMean(data);
+			CalculateStdDev(data);
+			
+			
+		}
+		void CalculateMean(List <float> data){
+			float sum = 0;
+			foreach(float d in data)
+				sum += d;
+			mean = sum/(float)data.Count;
+		}
+		
+		void CalculateStdDev(List <float> data){
+			float sum_sqr_diff = 0;
+			foreach(float d in data)
+				sum_sqr_diff += Mathf.Pow(mean - d, 2);
+			std_deviation = Mathf.Sqrt(sum_sqr_diff/data.Count);			
+		}
+		float CalculateProbability(float instance){
+			//(1/sqrt(2*pi*std_dev^2)*e^(-(data - mean)^2/(2*std_dev^2))
+			
+			float alpha = 1/(Mathf.Sqrt(2*Mathf.PI*Mathf.Pow(std_deviation, 2)));
+			float beta = Mathf.Exp((-Mathf.Pow(instance - mean, 2))/(2*Mathf.Pow(std_deviation, 2)));
+			
+			return alpha*beta;
+		}
+	};
+	
+	
+	public class BayesianClassifier{
+		
+		
+		
+		BayesianClassifier(){}
+		
+		
+	};
+	
 	
 	//we're going to keep track of the arm joints to interpret movement
 	//and relay that the DropletMovement
@@ -78,29 +125,46 @@ public class Naive_Bayesian : MonoBehaviour {
 	//we're going to save a queue of positions for now and analyze recent strings
 	//for movements we are checking for
 	private List <ArmsSnapshot> arm_states = new List<ArmsSnapshot>();
+	List <ArmsSnapshot> recorded_states = new List<ArmsSnapshot>();
+	
+	
 	//store detected motions here
 	public List <string> motions = new List<string>();
 	public bool updated = false;
 	
+	void RecordValues(){
+		TextWriter tw = new StreamWriter("Assets\\bayes_data.txt", true);
+		
+		foreach(ArmsSnapshot shot in recorded_states){
+			List<float> angles = shot.GenerateAngles();
+			string content = angles.ToString();
+			tw.WriteLine(train_name + " " + content);			
+		}
+		
+		tw.Close();
+	}
 	
-	/*void OnGUI(){
-		if(state == "none")
-			return;
-		if(state == "left")
-			GUI.Label(new Rect(25, Screen.height-125, 100, 100), states[0]);
-		if(state == "right")
-			GUI.Label(new Rect(25, Screen.height-125, 100, 100), states[1]);
-		if(state == "up")
-			GUI.Label(new Rect(25, Screen.height-125, 100, 100), states[2]);
-		if(state == "down")
-			GUI.Label(new Rect(25, Screen.height-125, 100, 100), states[3]);
-		if(state == "reset")
-			GUI.Label(new Rect(25, Screen.height-125, 100, 100), states[4]);
-		if(state == "stop")
-			GUI.Label(new Rect(25, Screen.height-125, 100, 100), states[5]);
+	void OnGUI(){
+		if(train){
+			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name);
+			if(recording){
+				if(GUI.Button(new Rect(25, 25, 100, 50), "Stop")){
+					RecordValues();
+					recording = false;
+				}
+			}
+			else{
+				if(GUI.Button(new Rect(25, 25, 100, 50), "Record"))
+					recording = true;
+			}
+			if(GUI.Button(new Rect(150, 25, 100, 50), "Stop Training"))
+				train = false;
+		}
+		else
+			if(GUI.Button(new Rect(25, 25, 100, 50), "Train"))
+				train = true;
 		
-		
-	}*/
+	}
 	
 	
 	void ReadFile(){
@@ -145,12 +209,18 @@ public class Naive_Bayesian : MonoBehaviour {
 		updated = false;
 		
 		//check for a new arm state
-		DetectMovement();
+		if(recording)
+			arm_states.Add(new ArmsSnapshot(left_arm, right_arm));
+		
+		
+		
+		
+		//DetectMovement();
 		//have arm states decay over time (but always have one in the chamber)
-		if(arm_states.Count > 1)
-			Decay();
+		//if(arm_states.Count > 1)
+		//	Decay();
 		//finally, interpret gestures
-		InterpretGestures();
+		//InterpretGestures();
 		
 		
 		
@@ -201,7 +271,7 @@ public class Naive_Bayesian : MonoBehaviour {
 		
 		//order is hand, elbow, shoulder
 		//we're going to generate angles on elbow joint and shoulder joint
-		
+		List <float> angles = cur_state.GenerateAngles();
 		
 		
 		
