@@ -22,6 +22,8 @@ public class Naive_Bayesian : MonoBehaviour {
 	public Texture2D[] states;	
 	float reset_timer = 0.0f;
 	
+	//struct to help out
+	
 	//struct to handle arm states
 	public struct ArmsSnapshot{
 		public float timestamp;
@@ -80,8 +82,6 @@ public class Naive_Bayesian : MonoBehaviour {
 		public feature(List <float> data){
 			CalculateMean(data);
 			CalculateStdDev(data);
-			
-			
 		}
 		void CalculateMean(List <float> data){
 			float sum = 0;
@@ -96,7 +96,7 @@ public class Naive_Bayesian : MonoBehaviour {
 				sum_sqr_diff += Mathf.Pow(mean - d, 2);
 			std_deviation = Mathf.Sqrt(sum_sqr_diff/data.Count);			
 		}
-		float CalculateProbability(float instance){
+		public float CalculateProbability(float instance){
 			//(1/sqrt(2*pi*std_dev^2)*e^(-(data - mean)^2/(2*std_dev^2))
 			
 			float alpha = 1/(Mathf.Sqrt(2*Mathf.PI*Mathf.Pow(std_deviation, 2)));
@@ -108,11 +108,28 @@ public class Naive_Bayesian : MonoBehaviour {
 	
 	
 	public class BayesianClassifier{
-		
+		public string pose_name;
+		List <feature> features = new List<feature>();
 		
 		
 		BayesianClassifier(){}
-		
+		BayesianClassifier(string n, List<List<float>> all_data){
+			pose_name = n;
+			for(int i = 0; i < all_data.Count; i++){
+				features.Add(new feature(all_data[i]));
+			}
+		}
+		public float GetProbablity(List<float> instance){
+			float prob = 1;
+			for(int i = 0; i < features.Count && i < instance.Count; i++){
+				float new_prob = features[i].CalculateProbablity(instance[i]);
+				if(new_prob == 0)
+					new_prob = .01;
+				prob*=new_prob;
+				
+			}
+			
+		}
 		
 	};
 	
@@ -126,6 +143,7 @@ public class Naive_Bayesian : MonoBehaviour {
 	//for movements we are checking for
 	private List <ArmsSnapshot> arm_states = new List<ArmsSnapshot>();
 	List <ArmsSnapshot> recorded_states = new List<ArmsSnapshot>();
+	List <BayesianClassifier> classifiers = new List<BayesianClassifier>();
 	
 	
 	//store detected motions here
@@ -137,8 +155,7 @@ public class Naive_Bayesian : MonoBehaviour {
 		
 		foreach(ArmsSnapshot shot in recorded_states){
 			List<float> angles = shot.GenerateAngles();
-			string content = angles.ToString();
-			tw.WriteLine(train_name + " " + content);			
+			tw.WriteLine(train_name + " " + angles.ToString());
 		}
 		
 		tw.Close();
@@ -148,10 +165,12 @@ public class Naive_Bayesian : MonoBehaviour {
 		if(train){
 			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name);
 			if(recording){
-				if(GUI.Button(new Rect(25, 25, 100, 50), "Stop")){
+				if(GUI.Button(new Rect(25, 25, 100, 50), "Stop and Save")){
 					RecordValues();
 					recording = false;
 				}
+				if(GUI.Button(new Rect(150, 25, 100, 50), "Stop (Don't Save)"))
+					recording = false;	
 			}
 			else{
 				if(GUI.Button(new Rect(25, 25, 100, 50), "Record"))
@@ -160,36 +179,44 @@ public class Naive_Bayesian : MonoBehaviour {
 			if(GUI.Button(new Rect(150, 25, 100, 50), "Stop Training"))
 				train = false;
 		}
-		else
+		else{
 			if(GUI.Button(new Rect(25, 25, 100, 50), "Train"))
 				train = true;
+			if(GUI.Button(new Rect(150, 25, 100, 50), "Update Library"))
+				ReadFile();
+		}
 		
 	}
 	
 	
 	void ReadFile(){
 		TextReader tr = new StreamReader("Assets\\bayes_data.txt");
+		classifiers.Clear();
 		
 		string line = tr.ReadLine();
+		
 		while(line != null){
-			//do stuff here	
+			//need to separate each feature into a different list, each different name will be associated with different instance of classifier
+			string[] sline = line.Split(' ');
+			string pose_name = sline[0];
+			List<List<float>> data = new List<List<float>>();
+			for(int i = 1; i < sline.GetLength(0); i++)
+				data.Add(new List<float>());
 			
-			line = tr.ReadLine();
+			while(line!= null && pose_name == sline[0]){
+				for(int i = 1; i < sline.GetLength(0); i++)
+					data[i-1].Add(float.Parse(sline[i]));				
+				
+				line = tr.ReadLine();
+				if(line != null)
+					sline = line.Split(' ');
+			}
+			//save current data to new classifier
+			classifiers.Add(BayesianClassifier(pose_name, data));
 		}
 		
 		tr.Close();
-	}
-	
-	void WriteFile(){
-		TextWriter tw = new StreamWriter("Assets\\bayes_data.txt");
-		
-		//write stuff
-		
-		tw.Close();
-		
-		
-	}
-	
+	}	
 	
 	// Use this for initialization
 	void Start () {
@@ -209,9 +236,13 @@ public class Naive_Bayesian : MonoBehaviour {
 		updated = false;
 		
 		//check for a new arm state
-		if(recording)
-			arm_states.Add(new ArmsSnapshot(left_arm, right_arm));
-		
+		if(recording){
+			recorded_states.Add(new ArmsSnapshot(left_arm, right_arm));
+		}
+		if(!train){
+			DetectMovement();
+			InterpretGestures();			
+		}
 		
 		
 		
@@ -223,10 +254,6 @@ public class Naive_Bayesian : MonoBehaviour {
 		//InterpretGestures();
 		
 		
-		
-		//check for level reset
-		if(reset_timer > 3.0f)
-			Application.LoadLevel("DemoScene");
 	}
 	
 	
@@ -265,15 +292,17 @@ public class Naive_Bayesian : MonoBehaviour {
 			return;
 		
 		ArmsSnapshot cur_state = arm_states[arm_states.Count-1];
-		float left_out;
+		/*float left_out;
 		float right_out;
-		float arm_length = cur_state.GetLength();		
+		float arm_length = cur_state.GetLength();*/
 		
 		//order is hand, elbow, shoulder
 		//we're going to generate angles on elbow joint and shoulder joint
 		List <float> angles = cur_state.GenerateAngles();
-		
-		
+		foreach(BayesianClassifier classifier in classifiers){
+			if(classifier.GetProbablity(angles) > .5)
+				Debug.Log(classifier.pose_name);			
+		}
 		
 		
 		
