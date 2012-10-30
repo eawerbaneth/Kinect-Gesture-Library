@@ -112,8 +112,8 @@ public class Naive_Bayesian : MonoBehaviour {
 		List <feature> features = new List<feature>();
 		
 		
-		BayesianClassifier(){}
-		BayesianClassifier(string n, List<List<float>> all_data){
+		public BayesianClassifier(){}
+		public BayesianClassifier(string n, List<List<float>> all_data){
 			pose_name = n;
 			for(int i = 0; i < all_data.Count; i++){
 				features.Add(new feature(all_data[i]));
@@ -122,12 +122,17 @@ public class Naive_Bayesian : MonoBehaviour {
 		public float GetProbablity(List<float> instance){
 			float prob = 1;
 			for(int i = 0; i < features.Count && i < instance.Count; i++){
-				float new_prob = features[i].CalculateProbablity(instance[i]);
+				feature feat = features[i];
+				float new_prob = feat.CalculateProbability(instance[i]);
+					
+					
+//					features[i].CalculateProbablity(instance[i]);
 				if(new_prob == 0)
-					new_prob = .01;
+					new_prob = .01f;
 				prob*=new_prob;
 				
 			}
+			return prob;
 			
 		}
 		
@@ -212,7 +217,7 @@ public class Naive_Bayesian : MonoBehaviour {
 					sline = line.Split(' ');
 			}
 			//save current data to new classifier
-			classifiers.Add(BayesianClassifier(pose_name, data));
+			classifiers.Add(new BayesianClassifier(pose_name, data));
 		}
 		
 		tr.Close();
