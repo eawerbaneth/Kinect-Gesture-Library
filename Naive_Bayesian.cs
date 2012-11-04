@@ -10,6 +10,8 @@ public class Naive_Bayesian : MonoBehaviour {
 	bool recording = false;
 	string train_name = "";
 	
+	float best = 0f;
+	
 	//struct to keep track of an individual joint position at a given time
 	public struct JointPositionSnapshot{
 		public Vector3 position;
@@ -58,6 +60,8 @@ public class Naive_Bayesian : MonoBehaviour {
 		}
 		public List <float> GenerateAngles(){
 			List <float> angles = new List<float>();
+			string line = "";
+			
 			Vector3 right_down = new Vector3(right_joints[2].position.x, right_joints[2].position.y - 1, right_joints[2].position.z);
 			Vector3 left_down = new Vector3(left_joints[2].position.x, left_joints[2].position.y - 1, left_joints[2].position.z);
 			//shoulder angles
@@ -102,6 +106,12 @@ public class Naive_Bayesian : MonoBehaviour {
 			float alpha = 1/(Mathf.Sqrt(2*Mathf.PI*Mathf.Pow(std_deviation, 2)));
 			float beta = Mathf.Exp((-Mathf.Pow(instance - mean, 2))/(2*Mathf.Pow(std_deviation, 2)));
 			
+			/*if(alpha*beta > .3f)
+				Debug.Log("close " + instance + " " + mean);
+			*/
+			
+			if(alpha*beta < .1f)
+				return .1f;
 			return alpha*beta;
 		}
 	};
@@ -121,17 +131,21 @@ public class Naive_Bayesian : MonoBehaviour {
 		}
 		public float GetProbablity(List<float> instance){
 			float prob = 1;
+			string line = pose_name;
 			for(int i = 0; i < features.Count && i < instance.Count; i++){
 				feature feat = features[i];
 				float new_prob = feat.CalculateProbability(instance[i]);
-					
+				
+				line += " " + new_prob;
 					
 //					features[i].CalculateProbablity(instance[i]);
-				if(new_prob == 0)
-					new_prob = .01f;
+				if(new_prob < .1f)
+					new_prob = .1f;
 				prob*=new_prob;
-				
 			}
+			
+			line += ": " + prob;
+			//Debug.Log(line);
 			return prob;
 			
 		}
@@ -160,7 +174,12 @@ public class Naive_Bayesian : MonoBehaviour {
 		
 		foreach(ArmsSnapshot shot in recorded_states){
 			List<float> angles = shot.GenerateAngles();
-			tw.WriteLine(train_name + " " + angles.ToString());
+			string line = train_name;
+			foreach(float angle in angles)
+				line += " " + angle;
+			
+			//Debug.Log(line);
+			tw.WriteLine(line);
 		}
 		
 		tw.Close();
@@ -170,6 +189,9 @@ public class Naive_Bayesian : MonoBehaviour {
 		if(train){
 			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name);
 			if(recording){
+				if(GUI.Button(new Rect(Screen.width - 150, 50, 100, 50), "Rec"))
+					recorded_states.Add(new ArmsSnapshot(left_arm, right_arm));
+				
 				if(GUI.Button(new Rect(25, 25, 100, 50), "Stop and Save")){
 					RecordValues();
 					recording = false;
@@ -181,7 +203,7 @@ public class Naive_Bayesian : MonoBehaviour {
 				if(GUI.Button(new Rect(25, 25, 100, 50), "Record"))
 					recording = true;
 			}
-			if(GUI.Button(new Rect(150, 25, 100, 50), "Stop Training"))
+			if(GUI.Button(new Rect(275, 25, 100, 50), "Stop Training"))
 				train = false;
 		}
 		else{
@@ -189,6 +211,17 @@ public class Naive_Bayesian : MonoBehaviour {
 				train = true;
 			if(GUI.Button(new Rect(150, 25, 100, 50), "Update Library"))
 				ReadFile();
+			
+			ArmsSnapshot cur_state = arm_states[arm_states.Count-1];
+			List <float> angles = cur_state.GenerateAngles();
+			string line = "";
+			foreach(float angle in angles)
+				line += angle + " ";
+			GUI.Label(new Rect(50, Screen.height - 100, 200, 50), line);
+			for(int i = 0; i < classifiers.Count; i++){
+				string l = classifiers[i].pose_name + " "  + classifiers[i].GetProbablity(angles);
+				GUI.Label(new Rect(50, Screen.height - 150 - 50*i, 200, 50), l);	
+			}
 		}
 		
 	}
@@ -216,6 +249,7 @@ public class Naive_Bayesian : MonoBehaviour {
 				if(line != null)
 					sline = line.Split(' ');
 			}
+			
 			//save current data to new classifier
 			classifiers.Add(new BayesianClassifier(pose_name, data));
 		}
@@ -224,13 +258,7 @@ public class Naive_Bayesian : MonoBehaviour {
 	}	
 	
 	// Use this for initialization
-	void Start () {
-		//if we aren't using the Kinect, turn this off
-		/*if(!droplet.isKinect){
-			this.enabled = false;
-			return;
-		}*/
-		
+	void Start () {		
 		//save our first positions
 		arm_states.Add(new ArmsSnapshot(left_arm, right_arm));
 		
@@ -242,21 +270,13 @@ public class Naive_Bayesian : MonoBehaviour {
 		
 		//check for a new arm state
 		if(recording){
-			recorded_states.Add(new ArmsSnapshot(left_arm, right_arm));
+			;
+			//recorded_states.Add(new ArmsSnapshot(left_arm, right_arm));
 		}
 		if(!train){
 			DetectMovement();
 			InterpretGestures();			
 		}
-		
-		
-		
-		//DetectMovement();
-		//have arm states decay over time (but always have one in the chamber)
-		//if(arm_states.Count > 1)
-		//	Decay();
-		//finally, interpret gestures
-		//InterpretGestures();
 		
 		
 	}
@@ -271,7 +291,6 @@ public class Naive_Bayesian : MonoBehaviour {
 				i--;
 			}
 		}
-		
 	}
 	
 	
@@ -285,8 +304,6 @@ public class Naive_Bayesian : MonoBehaviour {
 		}
 	}
 	
-	//we're going to look at the ways that the points are moving
-	//and translate that into 5 directions (forward is controlled by the river)
 	void InterpretGestures(){
 		//note: for the rush segments, we care more about current state
 		//than changes in state, but other games will be slightly different
@@ -303,10 +320,18 @@ public class Naive_Bayesian : MonoBehaviour {
 		
 		//order is hand, elbow, shoulder
 		//we're going to generate angles on elbow joint and shoulder joint
-		List <float> angles = cur_state.GenerateAngles();
-		foreach(BayesianClassifier classifier in classifiers){
-			if(classifier.GetProbablity(angles) > .5)
-				Debug.Log(classifier.pose_name);			
+		if(!train){
+			List <float> angles = cur_state.GenerateAngles();
+			foreach(BayesianClassifier classifier in classifiers){
+				if(best < classifier.GetProbablity(angles)){
+					best = classifier.GetProbablity(angles);
+					Debug.Log(classifier.pose_name + " " + best);
+				}
+				
+				//Debug.Log(classifier.pose_name + " " + classifier.GetProbablity(angles));
+				if(classifier.GetProbablity(angles) > .001)
+					Debug.Log("POSE DETECTED: " + classifier.pose_name);			
+			}
 		}
 		
 		
