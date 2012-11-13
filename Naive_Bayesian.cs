@@ -81,38 +81,49 @@ public class Naive_Bayesian : MonoBehaviour {
 	public class feature{
 		public float mean;
 		public float std_deviation;
+		List <float> data = new List<float>();
 		
 		public feature(){}
-		public feature(List <float> data){
-			CalculateMean(data);
-			CalculateStdDev(data);
+		public feature(List <float> d){
+			data = d;
+			CalculateMean();
+			CalculateStdDev();
+			Debug.Log("Feature - Mean: " + mean + " Std Dev: " + std_deviation);
 		}
-		void CalculateMean(List <float> data){
+		void CalculateMean(){
 			float sum = 0;
 			foreach(float d in data)
 				sum += d;
 			mean = sum/(float)data.Count;
 		}
 		
-		void CalculateStdDev(List <float> data){
+		void CalculateStdDev(){
 			float sum_sqr_diff = 0;
 			foreach(float d in data)
 				sum_sqr_diff += Mathf.Pow(mean - d, 2);
-			std_deviation = Mathf.Sqrt(sum_sqr_diff/data.Count);			
+			std_deviation = Mathf.Sqrt(sum_sqr_diff/data.Count);
 		}
 		public float CalculateProbability(float instance){
 			//(1/sqrt(2*pi*std_dev^2)*e^(-(data - mean)^2/(2*std_dev^2))
 			
 			float alpha = 1/(Mathf.Sqrt(2*Mathf.PI*Mathf.Pow(std_deviation, 2)));
-			float beta = Mathf.Exp((-Mathf.Pow(instance - mean, 2))/(2*Mathf.Pow(std_deviation, 2)));
+			float beta = -((Mathf.Pow(instance - mean, 2)/(2*Mathf.Pow(std_deviation, 2))));
+				//Mathf.Exp((-Mathf.Pow(instance - mean, 2))/(2*Mathf.Pow(std_deviation, 2)));
 			
 			/*if(alpha*beta > .3f)
 				Debug.Log("close " + instance + " " + mean);
 			*/
 			
-			if(alpha*beta < .1f)
+			float prob = alpha*Mathf.Exp(beta);
+			
+			if(prob < .1f)
 				return .1f;
-			return alpha*beta;
+			return prob;
+		}
+		public void AddData(float val){
+			data.Add(val);
+			CalculateMean();
+			CalculateStdDev();
 		}
 	};
 	
@@ -147,6 +158,11 @@ public class Naive_Bayesian : MonoBehaviour {
 			line += ": " + prob;
 			//Debug.Log(line);
 			return prob;
+		}
+		
+		public void AddData(List<float> new_data){
+			for(int i = 0; i < features.Count; i++)
+				features[i].AddData(new_data[i]);
 			
 		}
 		
@@ -185,6 +201,12 @@ public class Naive_Bayesian : MonoBehaviour {
 		tw.Close();
 	}
 	
+	int identification = 0;
+	float best_prob = 0;
+	List <float> best_data = new List<float>();
+	bool best_changed = false;
+	string best_name = "";
+	
 	void OnGUI(){
 		if(train){
 			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name);
@@ -219,12 +241,35 @@ public class Naive_Bayesian : MonoBehaviour {
 				line += angle + " ";
 			GUI.Label(new Rect(50, Screen.height - 100, 200, 50), line);
 			for(int i = 0; i < classifiers.Count; i++){
+				if(classifiers[i].GetProbablity(angles) > best_prob){
+					identification	= i;
+					best_data = angles;
+					best_changed = true;
+					best_prob = classifiers[i].GetProbablity(angles);
+					best_name = classifiers[i].pose_name;
+				}
+				
+				
 				string l = classifiers[i].pose_name + " "  + classifiers[i].GetProbablity(angles);
 				GUI.Label(new Rect(50, Screen.height - 150 - 50*i, 200, 50), l);	
 			}
 		}
 		
+		if(best_changed){
+			GUI.Label(new Rect(50, 200, 500, 50), "Best " + best_name + " is " + best_prob + ". Accept?");
+			if(GUI.Button(new Rect(50, 250, 100, 25), "Accept")){
+				classifiers[identification].AddData(best_data);
+				best_changed = false;
+				RecordValues();
+			}
+			if(GUI.Button(new Rect(50, 250, 100, 25), "Reject"))
+				best_changed = false;
+			best_prob = 0;
+			
+		}
+		
 	}
+	
 	
 	
 	void ReadFile(){
