@@ -1,0 +1,1 @@
+Disclaimer: I did not write this code - I found it on this website : http://wiki.etc.cmu.edu/unity3d/index.php/Microsoft_Kinect_-_Microsoft_SDK. Thanks to CMU for this skeletal recognition package for Unity 3D and for making it publicly available.
