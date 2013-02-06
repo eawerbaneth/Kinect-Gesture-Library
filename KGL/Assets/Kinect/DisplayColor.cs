@@ -9,6 +9,10 @@ public class DisplayColor : MonoBehaviour {
 	
 	private Texture2D tex;
 	
+	
+	//edits to only show the best pose recorded so far
+	public bool best_found = false;
+	
 	// Use this for initialization
 	void Start () {
 		kinect = devOrEmu.getKinect();
@@ -17,9 +21,18 @@ public class DisplayColor : MonoBehaviour {
 		renderer.material.mainTexture = tex;
 	}
 	
+	public void TakeSnapshot(){
+		if(kinect.pollColor()){
+			tex.SetPixels32(mipmapImg(kinect.getColor(),640,480));
+			tex.Apply(false);
+			
+		}
+		
+	}
+	
 	// Update is called once per frame
 	void Update () {
-		if (kinect.pollColor())
+		if (!best_found && kinect.pollColor())
 		{
 			//tex.SetPixels32(KinectSensor.Instance.colorImage);
 			tex.SetPixels32(mipmapImg(kinect.getColor(),640,480));

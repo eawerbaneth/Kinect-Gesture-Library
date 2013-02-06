@@ -3,6 +3,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System;
+using System.Runtime.Serialization.Formatters.Binary;
+using System.Runtime.Serialization;
+using Kinect;
 
 public class Naive_Bayesian : MonoBehaviour {
 	//record utilities
@@ -10,7 +13,13 @@ public class Naive_Bayesian : MonoBehaviour {
 	bool recording = false;
 	string train_name = "";
 	
+	public GUISkin skin;
+	
 	float best = 0f;
+	
+	GameObject KinectPrefab;
+	KinectInterface kinect;
+	public DeviceOrEmulator devOrEmu;
 	
 	//struct to keep track of an individual joint position at a given time
 	public struct JointPositionSnapshot{
@@ -24,7 +33,28 @@ public class Naive_Bayesian : MonoBehaviour {
 	public Texture2D[] states;	
 	float reset_timer = 0.0f;
 	
-	//struct to help out
+	//struct to help out with image recording
+	public DisplayColor best_img;
+	
+	private Color32[] mipmapImg(Color32[] src, int width, int height)
+	{
+		int newWidth = width / 2;
+		int newHeight = height / 2;
+		Color32[] dst = new Color32[newWidth * newHeight];
+		for(int yy = 0; yy < newHeight; yy++)
+		{
+			for(int xx = 0; xx < newWidth; xx++)
+			{
+				int TLidx = (xx * 2) + yy * 2 * width;
+				int TRidx = (xx * 2 + 1) + yy * width * 2;
+				int BLidx = (xx * 2) + (yy * 2 + 1) * width;
+				int BRidx = (xx * 2 + 1) + (yy * 2 + 1) * width;
+				dst[xx + yy * newWidth] = Color32.Lerp(Color32.Lerp(src[BLidx],src[BRidx],.5F),
+				                                       Color32.Lerp(src[TLidx],src[TRidx],.5F),.5F);
+			}
+		}
+		return dst;
+	}
 	
 	//struct to handle arm states
 	public struct ArmsSnapshot{
@@ -201,15 +231,16 @@ public class Naive_Bayesian : MonoBehaviour {
 		tw.Close();
 	}
 	
+	//best data
 	int identification = 0;
-	float best_prob = 0;
+	float best_prob = 0f;
 	List <float> best_data = new List<float>();
 	bool best_changed = false;
 	string best_name = "";
 	
 	void OnGUI(){
 		if(train){
-			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name);
+			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name, skin.label);
 			if(recording){
 				if(GUI.Button(new Rect(Screen.width - 150, 50, 100, 50), "Rec"))
 					recorded_states.Add(new ArmsSnapshot(left_arm, right_arm));
@@ -234,15 +265,23 @@ public class Naive_Bayesian : MonoBehaviour {
 			if(GUI.Button(new Rect(150, 25, 100, 50), "Update Library"))
 				ReadFile();
 			
+			//show our best picture if we have one
+			//GUI.DrawTexture(new Rect(Screen.width - 200, Screen.height - 200, 200, 200), best_pose);
+			
+			
 			ArmsSnapshot cur_state = arm_states[arm_states.Count-1];
 			List <float> angles = cur_state.GenerateAngles();
 			string line = "";
 			foreach(float angle in angles)
 				line += angle + " ";
-			GUI.Label(new Rect(50, Screen.height - 100, 200, 50), line);
-			for(int i = 0; i < classifiers.Count; i++){
+			GUI.Label(new Rect(50, Screen.height - 100, 200, 50), line, skin.label);
+			/*for(int i = 0; i < classifiers.Count; i++){
 				if(classifiers[i].GetProbablity(angles) > best_prob){
 					identification	= i;
+					
+					
+					//GetComponent<KinectPointController>().
+					
 					best_data = angles;
 					best_changed = true;
 					best_prob = classifiers[i].GetProbablity(angles);
@@ -251,21 +290,24 @@ public class Naive_Bayesian : MonoBehaviour {
 				
 				
 				string l = classifiers[i].pose_name + " "  + classifiers[i].GetProbablity(angles);
-				GUI.Label(new Rect(50, Screen.height - 150 - 50*i, 200, 50), l);	
-			}
+				GUI.Label(new Rect(50, Screen.height - 150 - 50*i, 200, 50), l, skin.label);	
+			}*/
 		}
 		
 		if(best_changed){
-			GUI.Label(new Rect(50, 200, 500, 50), "Best " + best_name + " is " + best_prob + ". Accept?");
+			GUI.Label(new Rect(50, 200, 500, 50), "Best " + best_name + " is " + best + ". Accept?", skin.label);
 			if(GUI.Button(new Rect(50, 250, 100, 25), "Accept")){
 				classifiers[identification].AddData(best_data);
 				best_changed = false;
+				best_prob = 0f;
 				RecordValues();
+				best_img.best_found = false;
 			}
-			if(GUI.Button(new Rect(200, 250, 100, 25), "Reject"))
+			if(GUI.Button(new Rect(200, 250, 100, 25), "Reject")){
 				best_changed = false;
-			best_prob = 0;
-			
+				best_prob = 0f;
+				best_img.best_found = false;	
+			}			
 		}
 		
 	}
@@ -302,10 +344,19 @@ public class Naive_Bayesian : MonoBehaviour {
 		tr.Close();
 	}	
 	
+	//testing
+	/*Color32[] colors = new Color32[0];
+	Texture2D best_pose; */
+	
+	
 	// Use this for initialization
-	void Start () {		
+	void Start () {
+		KinectPrefab = GameObject.Find("Kinect_Prefab");
+		kinect = KinectPrefab.GetComponent<DeviceOrEmulator>().getKinect();
+		
 		//save our first positions
 		arm_states.Add(new ArmsSnapshot(left_arm, right_arm));
+		//best_pose = new Texture2D(640, 480, TextureFormat.ARGB32, false);
 		
 	}
 	
@@ -315,15 +366,13 @@ public class Naive_Bayesian : MonoBehaviour {
 		
 		//check for a new arm state
 		if(recording){
-			;
+			;//do nothing for now, still debugging this feature
 			//recorded_states.Add(new ArmsSnapshot(left_arm, right_arm));
 		}
 		if(!train){
 			DetectMovement();
 			InterpretGestures();			
-		}
-		
-		
+		}		
 	}
 	
 	
@@ -369,7 +418,19 @@ public class Naive_Bayesian : MonoBehaviour {
 			List <float> angles = cur_state.GenerateAngles();
 			foreach(BayesianClassifier classifier in classifiers){
 				if(best < classifier.GetProbablity(angles)){
+					best_changed = true;
+					best_img.TakeSnapshot();
+					best_img.best_found = true;
+					/*if(kinect.pollColor()){
+						//colors = kinect.getColor();
+						best_pose.SetPixels32(mipmapImg(kinect.getColor(),640,480));
+						best_pose.Apply(false);
+					}*/
+					
+					
 					best = classifier.GetProbablity(angles);
+					best_name = classifier.pose_name;
+					best_data = angles;
 					Debug.Log(classifier.pose_name + " " + best);
 				}
 				
@@ -380,95 +441,7 @@ public class Naive_Bayesian : MonoBehaviour {
 		}
 		
 		
-		
-/*		//reset droplet movements
-		droplet.back = droplet.left = droplet.right = droplet.up = droplet.down = 0f;
-		
-		//left_out and right_out are going to be on a scale from 0 to 1
-		//	0 all the way in, 1 all the way out
-		left_out = (cur_state.left_joints[2].position.x - cur_state.left_joints[0].position.x)/arm_length;
-		right_out = (cur_state.right_joints[0].position.x - cur_state.right_joints[2].position.x)/arm_length;
-		
-		
-		//back, left, right
-		//back - both hands forward
-		if(left_out < 0.5 && right_out < 0.5){
-			droplet.back = 1 - (left_out + right_out)/2;
-			state = "stop";	
-		}
-		//left - both arms out, left down, right up
-		else if(cur_state.left_joints[0].position.y < cur_state.left_joints[2].position.y - 3*arm_length/4
-		   && cur_state.right_joints[0].position.y > cur_state.right_joints[2].position.y - arm_length/4){
-			droplet.left = (cur_state.left_joints[2].position.y - cur_state.left_joints[0].position.y)/arm_length;
-			state = "left";
-		}
-		//right - both arms out, left up, right down
-		else if(cur_state.left_joints[0].position.y > cur_state.left_joints[2].position.y - arm_length/4
-		         && cur_state.right_joints[0].position.y < cur_state.right_joints[2].position.y - 3*arm_length/4){
-			droplet.right = (cur_state.right_joints[2].position.y - cur_state.right_joints[0].position.y)/arm_length;
-			state = "right";	
-		}
-		
-		//INVERTED controls - up and down
-		else if(cur_state.left_joints[0].position.y < cur_state.left_joints[2].position.y - 3*arm_length/4
-		   && cur_state.right_joints[0].position.y < cur_state.right_joints[2].position.y - 3*arm_length/4){
-			//set their up movement based on extremity of their arm motion
-			float displacement = (cur_state.left_joints[2].position.y - cur_state.left_joints[0].position.y);
-			droplet.up = displacement/arm_length;
-			state = "up";
-		}
-		
-		
-		else if(cur_state.left_joints[0].position.y > cur_state.left_joints[2].position.y - arm_length/4
-		   && cur_state.right_joints[0].position.y > cur_state.right_joints[2].position.y - arm_length/4){
-			float displacement = (cur_state.left_joints[0].position.y - cur_state.left_joints[2].position.y);
-			droplet.down = displacement/arm_length;
-			state = "down";
-		}
-		else
-			state = "none";
-		
-		//RESET APPLICATION CONTROLS
-		Vector3 arm = cur_state.right_joints[0].position - cur_state.right_joints[2].position;
-		Vector3 down = new  Vector3(cur_state.right_joints[2].position.x, 
-			cur_state.right_joints[2].position.y-1,
-			cur_state.right_joints[2].position.z) - cur_state.right_joints[2].position;
-		Vector3 larm = cur_state.left_joints[0].position - cur_state.left_joints[2].position;
-		Vector3 ldown = new  Vector3(cur_state.left_joints[2].position.x, 
-			cur_state.left_joints[2].position.y-1,
-			cur_state.left_joints[2].position.z) - cur_state.left_joints[2].position;
-		
-		
-		//get angle between the vectors
-		float angle = Vector3.Angle(down, arm);
-		//Debug.Log(right_out + " Angle is " + angle + " " + reset_timer + " " + Time.deltaTime);
-		float langle = Vector3.Angle(ldown, larm);
-		
-		//arm must be seventy percent extended and shoulder to hand is twenty to forty degrees from downwards
-		if(right_out > .5 && (5 < angle && angle < 60) && langle < 15 ){
-			reset_timer += Time.deltaTime;
-			state = "reset";
-		}
-		else
-			reset_timer = 0f;
-		
-		
-		
-		
-		//there is an arm forward and it is tilted skyward, go up
-		if(left_out < 0.3f){
-			if(cur_state.left_joints[0].position.y > cur_state.left_joints[2].position.y)
-				droplet.up = 1f;
-			else if(cur_state.left_joints[0].position.y < cur_state.left_joints[2].position.y)
-				droplet.down = 1f;
-		}
-		//there is an arm forward and tilted down, go down
-		else if(right_out < 0.3f){
-			if(cur_state.right_joints[0].position.y > cur_state.right_joints[2].position.y)
-				droplet.up = 1f;
-			else if(cur_state.right_joints[0].position.y < cur_state.right_joints[2].position.y)
-				droplet.down = 1f;
-		}*/
+
 		
 	}
 }
