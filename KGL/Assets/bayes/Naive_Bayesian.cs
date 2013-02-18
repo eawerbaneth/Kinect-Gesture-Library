@@ -21,40 +21,111 @@ public class Naive_Bayesian : MonoBehaviour {
 	KinectInterface kinect;
 	public DeviceOrEmulator devOrEmu;
 	
+	
+	//types of joints
+	/*
+	 * 
+	 * A - angle between shoulder-ground and humerus
+	 * B - angle between shoulder-forward and humerus
+	 * C - angle between humerus and radius
+	 * D - angle between hip-ground and femur
+	 * E - angle between hip-forward and femus
+	 * F - angle between femur and tibia
+	 * G - twist of torso (angle offset of clavicle and pelvis)
+	 * 
+	 * */
+	
 	//struct to keep track of an individual joint position at a given time
 	public struct JointPositionSnapshot{
 		public Vector3 position;
+		float time;
 		public JointPositionSnapshot(Vector3 pos){	
 			position = pos;
+			time = Time.time;
 		}
 	};
 	
-	string state = "none";
-	public Texture2D[] states;	
+	public string state = "none";
 	float reset_timer = 0.0f;
 	
 	//struct to help out with image recording
 	public DisplayColor best_img;
 	
-	private Color32[] mipmapImg(Color32[] src, int width, int height)
-	{
-		int newWidth = width / 2;
-		int newHeight = height / 2;
-		Color32[] dst = new Color32[newWidth * newHeight];
-		for(int yy = 0; yy < newHeight; yy++)
-		{
-			for(int xx = 0; xx < newWidth; xx++)
-			{
-				int TLidx = (xx * 2) + yy * 2 * width;
-				int TRidx = (xx * 2 + 1) + yy * width * 2;
-				int BLidx = (xx * 2) + (yy * 2 + 1) * width;
-				int BRidx = (xx * 2 + 1) + (yy * 2 + 1) * width;
-				dst[xx + yy * newWidth] = Color32.Lerp(Color32.Lerp(src[BLidx],src[BRidx],.5F),
-				                                       Color32.Lerp(src[TLidx],src[TRidx],.5F),.5F);
-			}
-		}
-		return dst;
+	//BETH EDITING - polymorphic struct to handle grouped joints revised struct to handle arm states - single arm
+	public abstract class State{
+		public float timestamp;
+		public Vector3 [] joints;
+		public string type;
+		
+		public abstract float GetLength();
+		public abstract List <float> GenerateAngles();
+		
 	}
+	
+	
+	
+	public class ArmState : State{
+		//joints are stored shoulder, elbow, wrist
+		Vector3 shoulder_elbow; 
+		Vector3 elbow_wrist;
+		
+		
+		//calling this will take a snapeshot of arms and record time
+		public ArmState(GameObject [] arm){
+			joints = new Vector3[3];
+			timestamp = Time.time;
+			for(int i = 0; i < 3; i++)
+				joints[i] = arm[i].transform.position;
+			shoulder_elbow = joints[1] - joints[0];
+			elbow_wrist = joints[2] - joints[1];
+			type = "arm";
+		}
+		//used for determining whether or not Kinect is actively tracking
+		public static bool operator ==(ArmState a, ArmState b){
+			for(int i = 0; i < 3; i++)
+				if(a.joints[i] != b.joints[i])
+					return false;
+			return true;	
+		}
+		public static bool operator !=(ArmState a, ArmState b){
+			return !(a==b);
+		}
+		public static bool operator ==(ArmState a, GameObject [] b){
+			for(int i = 0; i < 3; i++)
+				if(a.joints[i] != b[i].transform.position)
+					return false;
+			return true;			
+		}
+		public static bool operator !=(ArmState a, GameObject [] b){
+			return !(a==b);
+			
+		}
+		
+		public override float GetLength(){
+			return shoulder_elbow.magnitude + elbow_wrist.magnitude;
+		}
+		public override List <float> GenerateAngles(){
+			//angles for arm is ABC, armpit-x, armpit-y, and elbow hinge
+			List <float> angles = new List<float>();
+			//generate shoulder-ground
+			Vector3 shoulder_ground = new Vector3(0, - 1, 0);
+			//generate shoulder-forward
+			Vector3 shoulder_forward = new Vector3(-1, 0, 0);
+			//armpit-x [shoulder_ground and shoulder_elbow)
+			angles.Add(Vector3.Angle(shoulder_ground, shoulder_elbow));
+			//armpit-y [shoulder_forward and shoulder_elbow)
+			angles.Add(Vector3.Angle(shoulder_forward, shoulder_elbow));
+			//elbow hinge
+			angles.Add(Vector3.Angle(shoulder_elbow, elbow_wrist));
+			
+			return angles;			
+		}
+		
+		
+	}
+	
+	
+	
 	
 	//struct to handle arm states
 	public struct ArmsSnapshot{
@@ -137,7 +208,7 @@ public class Naive_Bayesian : MonoBehaviour {
 			//(1/sqrt(2*pi*std_dev^2)*e^(-(data - mean)^2/(2*std_dev^2))
 			
 			float alpha = 1/(Mathf.Sqrt(2*Mathf.PI*Mathf.Pow(std_deviation, 2)));
-			float beta = -((Mathf.Pow(instance - mean, 2)/(2*Mathf.Pow(std_deviation, 2))));
+			float beta = -((Mathf.Pow(instance - mean, 2)/(2f*Mathf.Pow(std_deviation, 2))));
 				//Mathf.Exp((-Mathf.Pow(instance - mean, 2))/(2*Mathf.Pow(std_deviation, 2)));
 			
 			/*if(alpha*beta > .3f)
@@ -178,8 +249,7 @@ public class Naive_Bayesian : MonoBehaviour {
 				float new_prob = feat.CalculateProbability(instance[i]);
 				
 				line += " " + new_prob;
-					
-//					features[i].CalculateProbablity(instance[i]);
+				
 				if(new_prob < .1f)
 					new_prob = .1f;
 				prob*=new_prob;
@@ -199,15 +269,28 @@ public class Naive_Bayesian : MonoBehaviour {
 	};
 	
 	
-	//we're going to keep track of the arm joints to interpret movement
-	//and relay that the DropletMovement
+	//joints we're keeping track of
 	public GameObject [] left_arm;
 	public GameObject [] right_arm;
+	public GameObject [] left_leg;
+	public GameObject [] right_leg;
+	//can get shoulders and hips from this info
+	GameObject [] torso = new GameObject [4];
 	
 	//we're going to save a queue of positions for now and analyze recent strings
 	//for movements we are checking for
-	private List <ArmsSnapshot> arm_states = new List<ArmsSnapshot>();
+	/*private List <ArmState> arm_states_left = new List<ArmState>();
+	private List <ArmState> arm_states_right = new List<ArmState>();
+	*/
+	
+	//keep it all in a list of type State ordered depending on the mask
+	private List <State> states = new List<State>();
+	private int tracked_states = 2;//default - just arms for now
+	//current states
+	private List <State> new_states = new List<State>();
+	
 	List <ArmsSnapshot> recorded_states = new List<ArmsSnapshot>();
+	
 	List <BayesianClassifier> classifiers = new List<BayesianClassifier>();
 	
 	
@@ -239,6 +322,7 @@ public class Naive_Bayesian : MonoBehaviour {
 	string best_name = "";
 	
 	void OnGUI(){
+		//training control block
 		if(train){
 			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name, skin.label);
 			if(recording){
@@ -247,10 +331,13 @@ public class Naive_Bayesian : MonoBehaviour {
 				
 				if(GUI.Button(new Rect(25, 25, 100, 50), "Stop and Save")){
 					RecordValues();
+					recorded_states.Clear();
 					recording = false;
 				}
-				if(GUI.Button(new Rect(150, 25, 100, 50), "Stop (Don't Save)"))
+				if(GUI.Button(new Rect(150, 25, 100, 50), "Stop (Don't Save)")){
+					recorded_states.Clear();
 					recording = false;	
+				}
 			}
 			else{
 				if(GUI.Button(new Rect(25, 25, 100, 50), "Record"))
@@ -259,6 +346,7 @@ public class Naive_Bayesian : MonoBehaviour {
 			if(GUI.Button(new Rect(275, 25, 100, 50), "Stop Training"))
 				train = false;
 		}
+		//testing control block
 		else{
 			if(GUI.Button(new Rect(25, 25, 100, 50), "Train"))
 				train = true;
@@ -268,9 +356,11 @@ public class Naive_Bayesian : MonoBehaviour {
 			//show our best picture if we have one
 			//GUI.DrawTexture(new Rect(Screen.width - 200, Screen.height - 200, 200, 200), best_pose);
 			
+			//new states should be initialized by this point...
+			List <float> angles = new List<float>();
+			for(int i = 0; i < tracked_states; i++)
+				angles.AddRange(new_states[i].GenerateAngles());
 			
-			ArmsSnapshot cur_state = arm_states[arm_states.Count-1];
-			List <float> angles = cur_state.GenerateAngles();
 			string line = "";
 			foreach(float angle in angles)
 				line += angle + " ";
@@ -354,9 +444,13 @@ public class Naive_Bayesian : MonoBehaviour {
 		KinectPrefab = GameObject.Find("Kinect_Prefab");
 		kinect = KinectPrefab.GetComponent<DeviceOrEmulator>().getKinect();
 		
-		//save our first positions
-		arm_states.Add(new ArmsSnapshot(left_arm, right_arm));
-		//best_pose = new Texture2D(640, 480, TextureFormat.ARGB32, false);
+		//init our torso
+		torso[0] = left_arm[0];
+		torso[1] = right_arm[0];
+		torso[2] = left_leg[0];
+		torso[3] = right_leg[0];
+		
+		ReadFile();
 		
 	}
 	
@@ -377,11 +471,11 @@ public class Naive_Bayesian : MonoBehaviour {
 	
 	
 	void Decay(){
-		for(int i = 0; i < arm_states.Count; i++){
-			if(arm_states[i].timestamp > Time.time - 10f)
+		for(int i = 0; i < states.Count; i++){
+			if(states[i].timestamp > Time.time - 10f)
 				return;
 			else{
-				arm_states.RemoveAt(i);
+				states.RemoveAt(i);
 				i--;
 			}
 		}
@@ -389,13 +483,48 @@ public class Naive_Bayesian : MonoBehaviour {
 	
 	
 	void DetectMovement(){
+		//go through and check for movement - TODO - check for mask
+		
+		
+		//pick up our new states
+		new_states.Clear();
+		new_states.Add(new ArmState(left_arm));
+		new_states.Add(new ArmState(right_arm));
+		
+		if(states.Count > 0){
+			bool moved = false;
+			for(int i = 0; i < tracked_states; i++){
+				int index = states.Count - tracked_states + i;
+				if(states[index]!=new_states[i])
+					moved=true;
+				
+			}
+			if(moved)
+				states.AddRange(new_states);				
+		}
+		else{
+			states.AddRange(new_states);
+		}
+		
+		
+		/*
 		if(arm_states.Count > 0){
 		//check to see if any of the positions changed before we record anything
+			
+			
+			
 			if(arm_states[arm_states.Count-1].CompareStates(left_arm, right_arm)){
 				arm_states.Add(new ArmsSnapshot(left_arm, right_arm));
 				updated = true;	
 			}
-		}
+		}*/
+	}
+	
+	
+	void Train(){
+		//TODO - implement masks
+
+		
 	}
 	
 	void InterpretGestures(){
@@ -404,10 +533,12 @@ public class Naive_Bayesian : MonoBehaviour {
 		//Debug.Log(arm_states.Count-1);
 		
 		
-		if(arm_states.Count == 0)
+		if(states.Count == 0)
 			return;
 		
-		ArmsSnapshot cur_state = arm_states[arm_states.Count-1];
+		//our current states are in new_states
+		
+		//ArmsSnapshot cur_state = arm_states[arm_states.Count-1];
 		/*float left_out;
 		float right_out;
 		float arm_length = cur_state.GetLength();*/
@@ -415,7 +546,12 @@ public class Naive_Bayesian : MonoBehaviour {
 		//order is hand, elbow, shoulder
 		//we're going to generate angles on elbow joint and shoulder joint
 		if(!train){
-			List <float> angles = cur_state.GenerateAngles();
+			List <float> angles = new List<float>();
+			
+			for(int i = 0; i < tracked_states; i++)
+				angles.AddRange(new_states[i].GenerateAngles());
+
+			//List <float> angles = cur_state.GenerateAngles();
 			foreach(BayesianClassifier classifier in classifiers){
 				if(best < classifier.GetProbablity(angles)){
 					best_changed = true;
