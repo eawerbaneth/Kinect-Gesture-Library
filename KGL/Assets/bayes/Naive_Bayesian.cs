@@ -64,15 +64,7 @@ public class Naive_Bayesian : MonoBehaviour {
 	
 	
 	public class TorsoState: State{
-		//for this, the only angle we car about is the offset of the clavicle and pelvis
-		/*
-		 * 		torso[0] = left_arm[0];
-		torso[1] = right_arm[0];
-		torso[2] = left_leg[0];
-		torso[3] = right_leg[0];
-		
-		 * 
-		 * */
+		//for this, the only angle we care about is the offset of the clavicle and pelvis
 		
 		Vector3 clavicle;
 		Vector3 hip;
@@ -82,19 +74,21 @@ public class Naive_Bayesian : MonoBehaviour {
 			joints = new Vector3[4];
 			timestamp = Time.time;
 			for(int i = 0; i < 4; i++)
-				joints[i] = torso[i];
+				joints[i] = torso[i].transform.position;
 			clavicle = joints[0] - joints[1];
 			hip = joints[2] - joints[3];
 			type = "torso";
 		}
 		public static bool operator ==(TorsoState a, TorsoState b){
-			for(int i = 0; i < 4; i++)
+			for(int i = 0; i < 4; i++){
 				if(a.joints[i] != b.joints[i])
 					return false;
+				
+			}
 			return true;
 		}
 		public static bool operator !=(TorsoState a, TorsoState b){
-			return !a==b;
+			return !(a==b);
 		}
 		public static bool operator ==(TorsoState a, GameObject[] b){
 			for(int i = 0; i < 4; i++)
@@ -103,7 +97,7 @@ public class Naive_Bayesian : MonoBehaviour {
 			return true;
 		}
 		public static bool operator !=(TorsoState a, GameObject[] b){
-			return !a==b;
+			return !(a==b);
 		}
 		
 		public override float GetLength(){
@@ -399,11 +393,11 @@ public class Naive_Bayesian : MonoBehaviour {
 	
 	//keep it all in a list of type State ordered depending on the mask
 	private List <State> states = new List<State>();
-	private int tracked_states = 2;//default - just arms for now
+	private int tracked_states = 5;//default - arms, legs, and torso
 	//current states
 	private List <State> new_states = new List<State>();
 	
-	List <ArmsSnapshot> recorded_states = new List<ArmsSnapshot>();
+	List <List<State>> recorded_states = new List<List<State>>();
 	
 	List <BayesianClassifier> classifiers = new List<BayesianClassifier>();
 	
@@ -415,12 +409,15 @@ public class Naive_Bayesian : MonoBehaviour {
 	void RecordValues(){
 		TextWriter tw = new StreamWriter("Assets\\bayes_data.txt", true);
 		
-		foreach(ArmsSnapshot shot in recorded_states){
-			List<float> angles = shot.GenerateAngles();
+		foreach(List <State> shots in recorded_states){
 			string line = train_name;
-			foreach(float angle in angles)
-				line += " " + angle;
 			
+			foreach(State shot in shots){
+				List <float> angles = shot.GenerateAngles();
+				foreach(float angle in angles)
+					line += " " + angle;
+			}
+						
 			//Debug.Log(line);
 			tw.WriteLine(line);
 		}
@@ -440,8 +437,15 @@ public class Naive_Bayesian : MonoBehaviour {
 		if(train){
 			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name, skin.label);
 			if(recording){
-				if(GUI.Button(new Rect(Screen.width - 150, 50, 100, 50), "Rec"))
-					recorded_states.Add(new ArmsSnapshot(left_arm, right_arm));
+				if(GUI.Button(new Rect(Screen.width - 150, 50, 100, 50), "Rec")){
+					//only add in tracked states TODO- work with mask
+					List <State> new_shots = new List<State>();
+					for(int x = 0; x < tracked_states; x++)
+						new_shots.Add(new_states[x]);	
+					
+					recorded_states.Add(new_shots);
+					
+				}
 				
 				if(GUI.Button(new Rect(25, 25, 100, 50), "Stop and Save")){
 					RecordValues();
@@ -604,6 +608,9 @@ public class Naive_Bayesian : MonoBehaviour {
 		new_states.Clear();
 		new_states.Add(new ArmState(left_arm));
 		new_states.Add(new ArmState(right_arm));
+		new_states.Add(new LegState(left_leg));
+		new_states.Add(new LegState(right_leg));
+		new_states.Add(new TorsoState(torso));
 		
 		if(states.Count > 0){
 			bool moved = false;
@@ -611,7 +618,6 @@ public class Naive_Bayesian : MonoBehaviour {
 				int index = states.Count - tracked_states + i;
 				if(states[index]!=new_states[i])
 					moved=true;
-				
 			}
 			if(moved)
 				states.AddRange(new_states);				
@@ -652,11 +658,6 @@ public class Naive_Bayesian : MonoBehaviour {
 		
 		//our current states are in new_states
 		
-		//ArmsSnapshot cur_state = arm_states[arm_states.Count-1];
-		/*float left_out;
-		float right_out;
-		float arm_length = cur_state.GetLength();*/
-		
 		//order is hand, elbow, shoulder
 		//we're going to generate angles on elbow joint and shoulder joint
 		if(!train){
@@ -671,11 +672,6 @@ public class Naive_Bayesian : MonoBehaviour {
 					best_changed = true;
 					best_img.TakeSnapshot();
 					best_img.best_found = true;
-					/*if(kinect.pollColor()){
-						//colors = kinect.getColor();
-						best_pose.SetPixels32(mipmapImg(kinect.getColor(),640,480));
-						best_pose.Apply(false);
-					}*/
 					
 					
 					best = classifier.GetProbablity(angles);
