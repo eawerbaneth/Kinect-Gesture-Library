@@ -63,6 +63,123 @@ public class Naive_Bayesian : MonoBehaviour {
 	}
 	
 	
+	public class TorsoState: State{
+		//for this, the only angle we car about is the offset of the clavicle and pelvis
+		/*
+		 * 		torso[0] = left_arm[0];
+		torso[1] = right_arm[0];
+		torso[2] = left_leg[0];
+		torso[3] = right_leg[0];
+		
+		 * 
+		 * */
+		
+		Vector3 clavicle;
+		Vector3 hip;
+		
+		//calling this will take a snapshot of torso and record time
+		public TorsoState(GameObject [] torso){
+			joints = new Vector3[4];
+			timestamp = Time.time;
+			for(int i = 0; i < 4; i++)
+				joints[i] = torso[i];
+			clavicle = joints[0] - joints[1];
+			hip = joints[2] - joints[3];
+			type = "torso";
+		}
+		public static bool operator ==(TorsoState a, TorsoState b){
+			for(int i = 0; i < 4; i++)
+				if(a.joints[i] != b.joints[i])
+					return false;
+			return true;
+		}
+		public static bool operator !=(TorsoState a, TorsoState b){
+			return !a==b;
+		}
+		public static bool operator ==(TorsoState a, GameObject[] b){
+			for(int i = 0; i < 4; i++)
+				if(a.joints[i] != b[i].transform.position)
+					return false;
+			return true;
+		}
+		public static bool operator !=(TorsoState a, GameObject[] b){
+			return !a==b;
+		}
+		
+		public override float GetLength(){
+			//find middle of clavicle and middle of hip, return length of vector separating them
+			Vector3 mid_clav = (joints[0] + joints[1])/2;
+			Vector3 mid_hip = (joints[2] + joints[3])/2;
+			
+			Vector3 displacement = mid_hip - mid_clav;
+			return displacement.magnitude;			
+		}
+		public override List <float> GenerateAngles(){
+			//angles for toros is G - twist of torso (angle offset between clavicle and hip)
+			List <float> angles = new List <float>();
+			angles.Add(Vector3.Angle(clavicle, hip));
+			
+			return angles;
+		}
+		
+	}
+	
+	public class LegState: State{
+		//joints are stored hip, knee, ankle
+		Vector3 hip_knee;
+		Vector3 knee_ankle;
+		
+		//calling this will take a snapeshot of arm and record time
+		public LegState(GameObject [] leg){
+			joints = new Vector3[3];
+			timestamp = Time.time;
+			for(int i = 0; i < 3; i++)
+				joints[i] = leg[i].transform.position;
+			hip_knee = joints[1] - joints[0];
+			knee_ankle = joints[2] - joints[1];
+			type = "leg";
+		}
+		//used for determining whether or not Kinect is actively tracking
+		public static bool operator ==(LegState a, LegState b){
+			for(int i = 0; i < 3; i++)
+				if(a.joints[i] != b.joints[i])
+					return false;
+			return true;	
+		}
+		public static bool operator !=(LegState a, LegState b){
+			return !(a==b);
+		}
+		public static bool operator ==(LegState a, GameObject [] b){
+			for(int i = 0; i < 3; i++)
+				if(a.joints[i] != b[i].transform.position)
+					return false;
+			return true;			
+		}
+		public static bool operator !=(LegState a, GameObject [] b){
+			return !(a==b);
+			
+		}
+		
+		public override float GetLength(){
+			return hip_knee.magnitude + knee_ankle.magnitude;
+		}
+		public override List <float> GenerateAngles(){
+			//angles for arm is ABC, armpit-x, armpit-y, and elbow hinge
+			List <float> angles = new List<float>();
+			//generate shoulder-ground
+			Vector3 hip_ground = new Vector3(0, - 1, 0);
+			//generate hip-forward
+			Vector3 hip_forward = new Vector3(-1, 0, 0);
+			//hip-x [shoulder_ground and shoulder_elbow)
+			angles.Add(Vector3.Angle(hip_ground, hip_knee));
+			//hip-y [shoulder_forward and shoulder_elbow)
+			angles.Add(Vector3.Angle(hip_forward, hip_knee));
+			//knee hinge
+			angles.Add(Vector3.Angle(hip_knee, knee_ankle));
+			
+			return angles;			
+		}
+	}
 	
 	public class ArmState : State{
 		//joints are stored shoulder, elbow, wrist
@@ -70,7 +187,7 @@ public class Naive_Bayesian : MonoBehaviour {
 		Vector3 elbow_wrist;
 		
 		
-		//calling this will take a snapeshot of arms and record time
+		//calling this will take a snapeshot of arm and record time
 		public ArmState(GameObject [] arm){
 			joints = new Vector3[3];
 			timestamp = Time.time;
@@ -121,13 +238,10 @@ public class Naive_Bayesian : MonoBehaviour {
 			return angles;			
 		}
 		
-		
 	}
 	
 	
-	
-	
-	//struct to handle arm states
+	/*//struct to handle arm states
 	public struct ArmsSnapshot{
 		public float timestamp;
 		public JointPositionSnapshot[] left_joints;
@@ -177,7 +291,7 @@ public class Naive_Bayesian : MonoBehaviour {
 			return angles;
 			
 		}
-	};
+	};*/
 	
 	public class feature{
 		public float mean;
