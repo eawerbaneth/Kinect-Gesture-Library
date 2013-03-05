@@ -20,7 +20,6 @@ public class Naive_Bayesian : MonoBehaviour {
 	KinectInterface kinect;
 	public DeviceOrEmulator devOrEmu;
 	
-	
 	//types of joints
 	/*
 	 * 
@@ -60,7 +59,6 @@ public class Naive_Bayesian : MonoBehaviour {
 		public abstract List <float> GenerateAngles();
 		
 	}
-	
 	
 	public class TorsoState: State{
 		//for this, the only angle we care about is the offset of the clavicle and pelvis
@@ -285,14 +283,15 @@ public class Naive_Bayesian : MonoBehaviour {
 			
 		}
 	};*/
-	
+		
+		
 	public class feature{
 		public float mean;
 		public float std_deviation;
 		List <float> data = new List<float>();
 		
 		public feature(){}
-		public feature(List <float> d){
+		public feature(List <float> d){	
 			data = d;
 			CalculateMean();
 			CalculateStdDev();
@@ -335,24 +334,108 @@ public class Naive_Bayesian : MonoBehaviour {
 		}
 	};
 	
+	public enum JointMask{
+		None = 0x0,
+		LeftShoulderDown = 1,
+		LeftShoulderForward = 2,
+		LeftElbow = 4,
+		RightShoulderDown = 8,
+		RightShoulderForward = 16,
+		RightElbow = 32,
+		LeftHipDown = 64,
+		LeftHipForward = 128,
+		LeftKnee = 256,
+		RightHipDown = 512,
+		RightHipForward = 1028,
+		RightKnee = 2056,
+		Torso = 4112,
+		All = Arms | Legs | Torso,
+		LeftArm = LeftShoulderDown | LeftShoulderForward | LeftElbow,
+		RightArm = RightShoulderDown | RightShoulderForward | RightElbow,
+		LeftLeg = LeftHipDown | LeftHipForward| LeftKnee,
+		RightLeg = RightHipDown | RightHipForward | RightKnee,
+		Arms = LeftArm | RightArm,
+		Legs = LeftLeg | RightLeg
+	}
 	
 	public class BayesianClassifier{
 		public string pose_name;
 		List <feature> features = new List<feature>();
+		public JointMask mask;
 		
+		//keep track of joint mask within here
+		//JOINT MASK
+	/*
+	 * public enum BoneMask
+	{
+		None = 0x0,
+		Hip_Center = 0x1,
+		Spine = 0x2,
+		Shoulder_Center = 0x4,
+		Head = 0x8,
+		Shoulder_Left = 0x10,
+		Elbow_Left = 0x20,
+		Wrist_Left = 0x40,
+		Hand_Left = 0x80,
+		Shoulder_Right = 0x100,
+		Elbow_Right = 0x200,
+		Wrist_Right = 0x400,
+		Hand_Right = 0x800,
+		Hip_Left = 0x1000,
+		Knee_Left = 0x2000,
+		Ankle_Left = 0x4000,
+		Foot_Left = 0x8000,
+		Hip_Right = 0x10000,
+		Knee_Right = 0x20000,
+		Ankle_Right = 0x40000,
+		Foot_Right = 0x80000,
+		All = 0xFFFFF,
+		Torso = 0x10000F, //the leading bit is used to force the ordering in the editor
+		Left_Arm = 0x1000F0,
+		Right_Arm = 0x100F00,
+		Left_Leg = 0x10F000,
+		Right_Leg = 0x1F0000,
+		R_Arm_Chest = Right_Arm | Spine,
+		No_Feet = All & ~(Foot_Left | Foot_Right)
+	} */
+		
+		void SetMask(JointMask m){
+			mask = m;
+		}
 		
 		public BayesianClassifier(){}
-		public BayesianClassifier(string n, List<List<float>> all_data){
+		public BayesianClassifier(string n, List<List<float>> all_data, JointMask m = JointMask.All){
 			Debug.Log("creating new classifier : " + n);
 			pose_name =  n;
 			for(int i = 0; i < all_data.Count; i++){
 				features.Add(new feature(all_data[i]));
 			}
+			mask = m;
 		}
 		public float GetProbablity(List<float> instance){
 			float prob = 1;
 			string line = pose_name;
-			for(int i = 0; i < features.Count && i < instance.Count; i++){
+			
+			byte [] bytes  = BitConverter.GetBytes((int)mask);
+			
+			//byte [] bytes = BitConverter.GetBytes(mask);
+			BitArray bits = new BitArray(bytes);
+			
+			//only look at the relevant angles
+			for(int i = 0; i < instance.Count; i++){
+				if(bits[i]){//check if this feature is active in our mask
+					feature feat = features[i];
+					float new_prob = feat.CalculateProbability(instance[i]);
+					line += " " + new_prob;
+					
+					if(new_prob < .1f)
+						new_prob = .1f;
+					prob *= new_prob;
+
+				}			
+			}			
+			
+			/*for(int i = 0; i < features.Count && i < instance.Count; i++){
 				feature feat = features[i];
 				float new_prob = feat.CalculateProbability(instance[i]);
 				
@@ -363,7 +446,7 @@ public class Naive_Bayesian : MonoBehaviour {
 				if(new_prob < .1f)
 					new_prob = .1f;
 				prob*=new_prob;
-			}
+			}*/
 			
 			line += ": " + prob;
 			Debug.Log(line);
