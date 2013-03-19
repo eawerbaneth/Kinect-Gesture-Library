@@ -494,6 +494,8 @@ public class Naive_Bayesian : MonoBehaviour {
 	void RecordValues(){
 		TextWriter tw = new StreamWriter("Assets\\bayes_data.txt", true);
 		
+		//TODO - sort list before writing [improve loading times]
+		
 		foreach(List <State> shots in recorded_states){
 			string line = train_name;
 			
@@ -502,6 +504,17 @@ public class Naive_Bayesian : MonoBehaviour {
 				foreach(float angle in angles)
 					line += " " + angle;
 			}
+			
+			//need to add joint mask now (add up everything and store it as an int, when reading in the mask from the
+			//first instance of a pose will be the one that is saved)
+			int mask = 0;
+			for(int i = 0; i < 13; i++){
+				if(joints_[i])
+					mask += (int)Math.Pow(2, i);				
+			}
+			
+			line += " " + mask;
+			
 						
 			//Debug.Log(line);
 			tw.WriteLine(line);
@@ -517,10 +530,25 @@ public class Naive_Bayesian : MonoBehaviour {
 	bool best_changed = false;
 	string best_name = "";
 	
+	//store joint mask here
+	bool [] joints_ = {true, true, true, true, true, true, true, true, true, true, true, true, true};
+	string [] joint_names = {"LeftShoulderDown", "LeftShoulderForward", "LeftElbow", "RightShoulderDown",
+	"RightShoulderForward", "RightElbow", "LeftHipDown", "LeftHipForward", "LeftKnee", "RightHipDown",
+	"RightHipForward", "RightKnee", "Torso"};
+	
 	void OnGUI(){
 		//training control block
 		if(train){
+			
 			train_name = GUI.TextField(new Rect(25, 100, 100, 25), train_name);
+			
+			//JOINT MASK SELECTION
+			for(int i = 0; i < 13; i++){
+				if(GUI.Button(new Rect(Screen.width - 105, 5 + 30*i, 100, 25), "Turn " + (joints_[i] ? "off " : "on ") + joint_names[i]))
+					joints_[i] = !joints_[i];	
+			}
+			
+			
 			if(recording){
 				//if(GUI.Button(new Rect(Screen.width - 150, 50, 100, 50), "Rec")){
 					//only add in tracked states TODO- work with mask
@@ -548,9 +576,15 @@ public class Naive_Bayesian : MonoBehaviour {
 				if(GUI.Button(new Rect(25, 25, 100, 50), "Record"))
 					recording = true;
 			}
-			if(GUI.Button(new Rect(275, 25, 100, 50), "Stop Training"))
+			if(GUI.Button(new Rect(275, 25, 100, 50), "Stop Training")){
 				train = false;
+				//reset mask
+				for(int s = 0; s < 13; s++)
+					joints_[s] = true;
+			}
 		}
+		
+		
 		//testing control block
 		else{
 			if(GUI.Button(new Rect(25, 25, 100, 50), "Train"))
@@ -621,8 +655,12 @@ public class Naive_Bayesian : MonoBehaviour {
 			string[] sline = line.Split(' ');
 			string pose_name = sline[0];
 			List<List<float>> data = new List<List<float>>();
-			for(int i = 1; i < sline.GetLength(0); i++)
+			for(int i = 1; i < sline.GetLength(0) - 1; i++)
 				data.Add(new List<float>());
+			
+			//get mask also
+			int m = int.Parse(sline[sline.GetLength(0) - 1]);
+			JointMask mask = (JointMask)m;
 			
 			while(line!= null && pose_name == sline[0]){
 				for(int i = 1; i < sline.GetLength(0); i++)
@@ -634,7 +672,7 @@ public class Naive_Bayesian : MonoBehaviour {
 			}
 			
 			//save current data to new classifier
-			classifiers.Add(new BayesianClassifier(pose_name, data));
+			classifiers.Add(new BayesianClassifier(pose_name, data, mask));
 		}
 		
 		tr.Close();
